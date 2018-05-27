@@ -8,7 +8,7 @@ import tensorflow as tf
 
 FLAGS = tf.flags.FLAGS
 
-num_words = 1000 # 400000
+num_words = 100000 # 400000
 c_rsize = 137
 c_small_rsize = 99
 # c_b_learn_hd = True
@@ -81,10 +81,9 @@ def main():
 	l_i_test_closest = find_cd_closest(nd_train_recs, nd_q_recs)
 	nd_bin_db, nd_bin_q = create_baseline(nd_train_recs), create_baseline(nd_q_recs)
 	rat10 = test(nd_bin_db, nd_bin_q, l_i_test_closest, 10)
-	# rat100 = test(nd_bin_db, nd_bin_q, l_i_test_closest, 100)
-	# rat1000 = test(nd_bin_db, nd_bin_q, l_i_test_closest, 1000)
-	# print('r@: 10, 100, 1000:', rat10, rat100, rat1000)
-	print('r@: 10:', rat10)
+	rat100 = test(nd_bin_db, nd_bin_q, l_i_test_closest, 100)
+	rat1000 = test(nd_bin_db, nd_bin_q, l_i_test_closest, 1000)
+	print('r@: 10, 100, 1000:', rat10, rat100, rat1000)
 	return
 
 

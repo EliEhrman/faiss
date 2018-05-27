@@ -1,0 +1,19 @@
+Sunday 27th May 2018
+
+Initial shot. I'm planning to take glove vectors and implement k-means clustering and dimension reduction.
+
+After that I will try and learn hamming distance bit-vectors for specific clusters
+
+Results for baseline. 100k words, 95% training the rest asking for the closest word in the db
+
+r@: 10, 100, 1000: 0.470705858828 0.76524695061 0.956808638272
+
+BTW for 10k words, 50% training the results were:
+
+r@: 10, 100, 1000: 0.683663267347 0.943411317736 0.998800239952
+
+For 1k, 95% train r@10 is 0.764
+
+Checking in with:
+
+First basline on glove
