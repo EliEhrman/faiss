@@ -17,3 +17,9 @@ For 1k, 95% train r@10 is 0.764
 Checking in with:
 
 First basline on glove
+
+Tuesday 29th May 2018
+
+Checking in with:
+
+glove.py initializes mat_sel to very poor result.
