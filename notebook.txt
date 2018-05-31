@@ -23,3 +23,20 @@ Tuesday 29th May 2018
 Checking in with:
 
 glove.py initializes mat_sel to very poor result.
+
+Turns out that there is a problem with the idea. We can't allow the bit vectors to converge to zero distance
+or the whole model collapses to the same bits.
+
+I'll try to have the bitvector distance converge to the CS distance. However, first, I want to make sure that the
+sel mat learning we are using works. So the fiorst stage is to try and learn the baseline bitdb
+
+Scrub that. I'll try another time at setting the target bits. This time, one bit at a time, aiming to keep an HD
+similar to the CD
+
+Thursday 31st May
+
+Well at least one thing works. A nice run with kmeans.
+
+Checking in with:
+
+kmeans without dimred working in glove_kmeans.py

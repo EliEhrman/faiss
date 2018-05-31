@@ -1,3 +1,6 @@
+"""
+This module abandoned because it tried to sample all the input values. This is more than necessary
+"""
 from __future__ import print_function
 import csv
 import random
@@ -27,7 +30,6 @@ c_keep_away_from_avg_factor = 1.
 c_eval_every = 100
 c_num_percentile_stops = 10
 c_val_thresh_step_size = 1 # the val thresh is the threshold for individual input values not the aggrtegate of these threshes
-c_num_input_samp = 3 # how many input values to sample and apply thresh to
 
 def find_cd_single_closest(train_arr, test_arr):
 	l_i_test_closest = []
@@ -162,10 +164,6 @@ def create_sel_mat(word_arr):
 	# for ival in range(c_key_dim):
 	# 	nd_thresh[ival, :] = np.take(nd_percentile[:, ival], nd_val_thresh[ival, :])
 	nd_thresh_ivals = np.asarray([np.take(nd_percentile[:, ival], nd_val_thresh[ival, :]) for ival in range(c_key_dim)])
-	nd_thresh_vals = np.zeros((c_num_input_samp, c_bitvec_size))
-	for ival in range(c_key_dim):
-		r = range(ival, min(ival+c_num_input_samp, c_key_dim)) + range(ival - c_key_dim + c_num_input_samp)
-		nd_thresh_vals[:,ival] = nd_thresh_ivals[r,ival]
 	nd_thresh_sum_thresh = np.sum(1.0 - (nd_val_thresh.astype(float) / float(c_num_percentile_stops)), axis=0)
 	# return (np.random.rand(c_key_dim, c_bitvec_size), np.full(c_key_dim, c_bitvec_size/2))
 	return (nd_thresh_ivals, nd_thresh_sum_thresh, nd_steps)
