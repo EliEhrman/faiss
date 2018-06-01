@@ -40,3 +40,19 @@ Well at least one thing works. A nice run with kmeans.
 Checking in with:
 
 kmeans without dimred working in glove_kmeans.py
+
+Friday 1st June 2018
+
+Don't know how to make it work. The iteration process seems to work very well to move all the elements of the
+array to a position relative to each other kust as desired.However, the r@10 number falls from its initial value of
+60%+ to 40%. Even though the score drops nicely. The baseline is in the high 70's
+
+I've tries changing the pairing every 100 iterations, but the effect persists
+
+There is maybe a hope that of the score gets really low, the r@ will finally go up. The hope is justified by the
+fact that after the drop gets to about 1.8 or less, the r@ does go to the 50's. It would have to drop tp 0.4
+to make the iteration look good enough. It so far seems to get stuck at 1.4 - so 0.4 seems like a distant dream
+
+Checking in with:
+
+Iterated to target distances nicely but error does not beat the deadline
