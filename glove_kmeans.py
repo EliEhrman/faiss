@@ -2,13 +2,15 @@ from __future__ import print_function
 import csv
 import random
 import numpy as np
+import os
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 import tensorflow as tf
 
 FLAGS = tf.flags.FLAGS
 
-num_words = 100000 # 10000 # 400000
+num_words = 1000 # 10000 # 400000
 c_rsize = 137
 c_small_rsize = 99
 # c_b_learn_hd = True
@@ -19,12 +21,13 @@ tf.flags.DEFINE_float('nn_lrn_rate', 0.001,
 c_key_dim = 50
 c_train_fraction = 0.5
 # c_num_centroids = 7 # should be 200
-c_num_k_eval = 10
-c_num_clusters_q = 100
-c_num_clusters = 10000
+c_num_k_eval = 1
+c_num_clusters_q = 10
+c_num_clusters = 100
 c_kmeans_num_batches = 1
 c_kmeans_num_db_segs = 1
 c_kmeans_iters = 6
+c_global_rat = c_num_k_eval * c_num_clusters_q
 
 def find_cd_single_closest(train_arr, test_arr):
 	l_i_test_closest = []
@@ -33,22 +36,55 @@ def find_cd_single_closest(train_arr, test_arr):
 		l_i_test_closest.append(np.argmax(cd))
 	return l_i_test_closest
 
-def get_cd_closest(db, q, k):
-	l_i_cd_closest = []
+def get_closest_clusters(l_centroids, l_cluster_idxs, q, k, rat):
+	l_i_cd_closest, l_l_k = [], []
 	for test_vec in q:
-		cd = np.dot(db, test_vec)
+		cd = np.dot(l_centroids, test_vec)
 		cd_winners = np.argpartition(cd, -k)[-k:]
 		cd_of_winners = cd[cd_winners]
 		iwinners = np.argsort(-cd_of_winners)
 		cd_idx_sorted = cd_winners[iwinners]
-		l_i_cd_closest.append(cd_idx_sorted)
-	return l_i_cd_closest
+		cd_of_winners = cd[cd_idx_sorted]
+		# imax, imin = np.argmax(cd_of_winners), np.argmin(cd_of_winners)
+		cdmax, cdmin = cd_of_winners[0], cd_of_winners[-1]
+		w = (cd_of_winners - cdmin) / (cdmax - cdmin)
+		w /= sum(w)
+		l_k, rat_left, aw_used = [], rat, 0.0
+		for iw, aw in enumerate(w):
+			# keep calculating the fractions as the top is removed
+			wlen = l_cluster_idxs[cd_idx_sorted[iw]].shape[0]
+			if aw_used > .999:
+				break
+			wfactor = aw / (1. - aw_used)
+			aw_used += aw
+			if (rat_left * wfactor) > wlen:
+				l_k.append(wlen+1)
+				rat_left -= wlen
+			else:
+				nhere = int(round(rat_left * wfactor))
+				rat_left -= nhere
+				l_k.append(nhere)
 
-def eval_clusters(l_clusters, l_cluster_idxs, q, k, l_i_cluster_closest, l_i_test_closest):
+		l_l_k.append(l_k)
+		# iwinners = np.argsort(-cd_of_winners)
+		# cd_idx_sorted = cd_winners[iwinners]
+		l_i_cd_closest.append(cd_idx_sorted)
+	return l_i_cd_closest, l_l_k
+
+def eval_clusters(l_clusters, l_cluster_idxs, q, k_src, l_i_cluster_closest, l_i_test_closest, l_l_k):
 	num_hit = 0.
 	for itest, test_vec in enumerate(q):
-		for icluster in l_i_cluster_closest[itest]:
-			if k >= l_clusters[icluster].shape[0]:
+		for iicluster, icluster in enumerate(l_i_cluster_closest[itest]):
+			# k = k_src
+
+			if len(l_l_k[itest]) <= iicluster:
+				break
+			k = l_l_k[itest][iicluster]
+
+			# k = 100
+			if k == 0:
+				continue
+			elif k >= l_clusters[icluster].shape[0]:
 				cd_winners = range(l_clusters[icluster].shape[0])
 			else:
 				cd = np.dot(l_clusters[icluster], test_vec)
@@ -330,8 +366,8 @@ def main():
 	l_clusters = []
 	for cluster_idxs in l_cluster_idxs:
 		l_clusters.append(nd_train_recs[cluster_idxs])
-	l_i_cluster_closest = get_cd_closest(l_centroids, nd_q_recs, c_num_clusters_q)
-	score = eval_clusters(l_clusters, l_cluster_idxs, nd_q_recs, c_num_k_eval, l_i_cluster_closest, l_i_test_closest)
+	l_i_cluster_closest, l_k = get_closest_clusters(l_centroids, l_cluster_idxs, nd_q_recs, c_num_clusters_q, c_global_rat)
+	score = eval_clusters(l_clusters, l_cluster_idxs, nd_q_recs, c_num_k_eval, l_i_cluster_closest, l_i_test_closest, l_k)
 	print(c_num_clusters_q, 'out of', c_num_clusters, 'clusters, k =', c_num_k_eval, 'per cluster,', train_limit, 'training records', nd_q_recs.shape[0], 'queries. score:', score)
 	return
 

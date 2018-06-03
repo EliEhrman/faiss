@@ -56,3 +56,19 @@ to make the iteration look good enough. It so far seems to get stuck at 1.4 - so
 Checking in with:
 
 Iterated to target distances nicely but error does not beat the deadline
+
+Sunday 3rd June
+
+I got glove_kmeans to work using differential k. What I mean by this is that the closer centroids get a higher
+k in k-NN and the further ones have less. I take the CD of the centroids to divide up a pool of k's (the
+pool is also refered to as the rat (r@). If the cluster has too few members for it's share of the rat, the
+others divide the leftover.
+
+Note in glove_kmeans at this stage this actually makes no difference since knn after kmeans searching for the
+r@1 closest, the closest turns up as the first of the knn if it is in the cluster at all. It only matters
+where the second stage (after the centroid discovery phase) is ANN such as dimred, PQ or HD
+
+Checking in with:
+
+Differential k for clustering works.
+

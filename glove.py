@@ -17,7 +17,7 @@ glove_fn = '../../data/glove/glove.6B.50d.txt'
 # tf.flags.DEFINE_float('nn_lrn_rate', 0.001,
 # 					  'base learning rate for nn ')
 c_key_dim = 50
-c_bitvec_size = 64
+c_bitvec_size = 50
 c_train_fraction = 0.8
 c_num_centroids = 7 # should be 200
 c_num_ham_winners = 10
@@ -27,8 +27,8 @@ c_keep_away_from_avg_factor = 1.
 c_eval_every = 1
 c_num_percentile_stops = 10
 c_val_thresh_step_size = 100 # the val thresh is the threshold for individual input values not the aggrtegate of these threshes
-c_num_input_samp = 3 # how many input values to sample and apply thresh to
-c_improve_bad = 0.01 # chance that we will ignore the pre-score and select anyway
+c_num_input_samp = 2 # how many input values to sample and apply thresh to
+c_improve_bad = 0.001 # chance that we will ignore the pre-score and select anyway
 
 def find_cd_single_closest(train_arr, test_arr):
 	l_i_test_closest = []
@@ -188,7 +188,7 @@ def create_sel_mat(word_arr):
 	l_decile_stops = [float(decile) * (100.0 / float(c_num_percentile_stops)) for decile in range(c_num_percentile_stops+1)]
 	nd_percentile = np.percentile(word_arr, l_decile_stops, axis=0)
 	nd_steps = (nd_percentile[-2] - nd_percentile[1]) / c_val_thresh_step_size
-	nd_mins, nd_maxs = nd_percentile[1], nd_percentile[-2]
+	nd_mins, nd_maxs = nd_percentile[0], nd_percentile[-1]
 	nd_val_thresh = np.random.choice(a=np.arange(2,7), size=(c_key_dim, c_bitvec_size))
 	# nd_thresh = np.zeros((c_key_dim, c_bitvec_size))
 	# for ival in range(c_key_dim):
