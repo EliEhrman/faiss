@@ -27,8 +27,9 @@ c_keep_away_from_avg_factor = 1.
 c_eval_every = 1
 c_num_percentile_stops = 10
 c_val_thresh_step_size = 100 # the val thresh is the threshold for individual input values not the aggrtegate of these threshes
-c_num_input_samp = 2 # how many input values to sample and apply thresh to
+c_num_input_samp = 1 # how many input values to sample and apply thresh to
 c_improve_bad = 0.001 # chance that we will ignore the pre-score and select anyway
+c_default_thresh_val = 0.
 
 def find_cd_single_closest(train_arr, test_arr):
 	l_i_test_closest = []
@@ -189,11 +190,11 @@ def create_sel_mat(word_arr):
 	nd_percentile = np.percentile(word_arr, l_decile_stops, axis=0)
 	nd_steps = (nd_percentile[-2] - nd_percentile[1]) / c_val_thresh_step_size
 	nd_mins, nd_maxs = nd_percentile[0], nd_percentile[-1]
-	nd_val_thresh = np.random.choice(a=np.arange(2,7), size=(c_key_dim, c_bitvec_size))
+	# nd_val_thresh = np.random.choice(a=np.arange(2,7), size=(c_key_dim, c_bitvec_size))
 	# nd_thresh = np.zeros((c_key_dim, c_bitvec_size))
 	# for ival in range(c_key_dim):
 	# 	nd_thresh[ival, :] = np.take(nd_percentile[:, ival], nd_val_thresh[ival, :])
-	nd_thresh_ivals = np.asarray([np.take(nd_percentile[:, ival], nd_val_thresh[ival, :]) for ival in range(c_key_dim)])
+	# nd_thresh_ivals = np.asarray([np.take(nd_percentile[:, ival], nd_val_thresh[ival, :]) for ival in range(c_key_dim)])
 	num_samps = c_num_input_samp * c_bitvec_size
 	l_samp_src = []
 	num_placed = 0
@@ -202,7 +203,8 @@ def create_sel_mat(word_arr):
 		l_samp_src += range(num_to_place)
 		num_placed += num_to_place
 	random.shuffle(l_samp_src)
-	l_samp_thresh = [nd_percentile[random.randint(0,c_num_percentile_stops), samp] for samp in l_samp_src]
+	# l_samp_thresh = [nd_percentile[random.randint(0,c_num_percentile_stops), samp] for samp in l_samp_src]
+	l_samp_thresh = [nd_percentile[c_num_percentile_stops/2, samp] for samp in l_samp_src]
 	l_samp_steps = [nd_steps[samp] for samp in l_samp_src]
 	l_mins, l_maxs = [nd_mins[samp] for samp in l_samp_src], [nd_maxs[samp] for samp in l_samp_src]
 	nd_samp_src = np.asarray(l_samp_src).reshape((c_num_input_samp, c_bitvec_size))
@@ -215,7 +217,7 @@ def create_sel_mat(word_arr):
 	# 	r = range(ival, min(ival+c_num_input_samp, c_key_dim)) + range(ival - c_key_dim + c_num_input_samp)
 	# 	nd_thresh_vals[:,ival] = nd_thresh_ivals[r,ival]
 	# nd_thresh_sum_thresh = np.sum(1.0 - (nd_val_thresh.astype(float) / float(c_num_percentile_stops)), axis=0)
-	nd_thresh_sum_thresh = np.full((c_num_input_samp, c_bitvec_size), 1.)
+	nd_thresh_sum_thresh = np.full((c_num_input_samp, c_bitvec_size), c_default_thresh_val)
 	# return (np.random.rand(c_key_dim, c_bitvec_size), np.full(c_key_dim, c_bitvec_size/2))
 	return (nd_samp_src, nd_samp_thresh, nd_thresh_sum_thresh, nd_samp_steps, nd_samp_mins, nd_samp_maxs)
 
@@ -231,7 +233,7 @@ def create_bit_db(word_arr, sel_mat):
 	b = np.tile(np.expand_dims(bitcomps, axis=0), reps=[numrecs, 1, 1])
 	c = np.where(a>b, np.ones_like(a), np.zeros_like(a))
 	# g = np.sum(c, axis=1)
-	d = np.where(np.sum(c, axis=1) > 1., np.ones((numrecs, c_bitvec_size), dtype=np.uint8),
+	d = np.where(np.sum(c, axis=1) > nd_thresh_sum_thresh, np.ones((numrecs, c_bitvec_size), dtype=np.uint8),
 				 np.zeros((numrecs, c_bitvec_size), dtype=np.uint8))
 	# e = np.sum(d, axis=0).astype(float) / float(numrecs)
 	# for iiter in xrange(300):

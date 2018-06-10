@@ -72,3 +72,11 @@ Checking in with:
 
 Differential k for clustering works.
 
+Sunday 12th June
+
+CIW:
+
+Made faiss work for sift 1M using the concepts of glove_kmeans.py
+
+
+

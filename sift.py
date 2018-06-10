@@ -1,43 +1,107 @@
 from __future__ import print_function
-import csv
-import random
+# import struct
 import numpy as np
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+c_b_small = True
+if c_b_small:
+	os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+	import tensorflow as tf
+	fn_db = '../../data/sift/siftsmall_base.fvecs'
+	fn_q = '../../data/sift/siftsmall_query.fvecs'
+	fn_gt = '../../data/sift/siftsmall_groundtruth.ivecs'
+	c_num_k_eval = 10
+	c_num_clusters_q = 10
+	c_num_clusters = 800
+	c_kmeans_num_db_segs = 2
+else:
+	# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+	import tensorflow as tf
+	fn_db = '../../data/sift/sift_base.fvecs'
+	fn_q = '../../data/sift/sift_query.fvecs'
+	fn_gt = '../../data/sift/sift_groundtruth.ivecs'
+	c_num_k_eval = 10
+	c_num_clusters_q = 256
+	c_num_clusters = 8192
+	c_kmeans_num_db_segs = 40
 
-import tensorflow as tf
-
-FLAGS = tf.flags.FLAGS
-
-num_words = 10000 # 10000 # 400000
-c_rsize = 137
-c_small_rsize = 99
-# c_b_learn_hd = True
-
-glove_fn = '../../data/glove/glove.6B.50d.txt'
-tf.flags.DEFINE_float('nn_lrn_rate', 0.001,
-					  'base learning rate for nn ')
-c_key_dim = 50
-c_train_fraction = 0.95
-# c_num_centroids = 7 # should be 200
-c_num_k_eval = 20
-c_num_clusters_q = 10
-c_num_clusters = 80
+c_rat = 100
+c_key_dim = 128
 c_kmeans_num_batches = 1
-c_kmeans_num_db_segs = 2
 c_kmeans_iters = 6
 c_global_rat = c_num_k_eval * c_num_clusters_q
 c_b_test_baseline = True # Useful information but slow down terribly on large db's
 
-def find_cd_single_closest(train_arr, test_arr):
-	l_i_test_closest = []
+"""
+with open(fn, "rb") as binary_file:
+	# Read the whole file at once
+	data = binary_file.read()
+	i = struct.unpack('<H', data[:2])
+	print(i)
+"""
+
+def ivecs_read(fname):
+    a = np.fromfile(fname, dtype='int32')
+    d = a[0]
+    return a.reshape(-1, d + 1)[:, 1:].copy()
+
+def fvecs_read(filename, c_contiguous=True):
+    fv = np.fromfile(filename, dtype=np.float32)
+    if fv.size == 0:
+        return np.zeros((0, 0))
+    dim = fv.view(np.int32)[0]
+    assert dim > 0
+    fv = fv.reshape(-1, 1 + dim)
+    if not all(fv.view(np.int32)[:, 0] == dim):
+        raise IOError("Non-uniform vector sizes in " + filename)
+    fv = fv[:, 1:]
+    if c_contiguous:
+        fv = fv.copy()
+
+	en = np.linalg.norm(fv, axis=1)
+	fv = (fv.transpose() / en).transpose()
+
+	return fv
+
+def load_vecs():
+	nd_db = fvecs_read(fn_db)
+	nd_q = fvecs_read(fn_q)
+	nd_gt = ivecs_read(fn_gt)
+	return nd_db, nd_q, nd_gt
+
+def create_baseline(nd_full_db, arr_median):
+	return np.where(nd_full_db > arr_median, np.ones_like(nd_full_db), np.zeros_like(nd_full_db)).astype(np.int)
+
+def test(train_bin_db, test_bin_arr, l_i_test_best, rat):
+	num_hits, num_poss = 0.0, 0.0
+	for itest, test_vec in enumerate(test_bin_arr):
+		if itest % 10 == 0:
+			print('Baseline: tested', itest, 'records. Score:', num_hits / float(itest) if itest > 0 else 'n/a')
+		hd = np.sum(np.where(np.not_equal(test_vec, train_bin_db), np.ones_like(train_bin_db), np.zeros_like(train_bin_db)), axis=1)
+		hd_winners = np.argpartition(hd, (rat + 1))[:(rat + 1)]
+		num_hits += 1.0 if np.any(hd_winners == l_i_test_best[itest]) else 0.0
+
+	return num_hits / float(test_bin_arr.shape[0])
+
+def test_cd_single_closest(train_arr, test_arr, l_i_test_closest):
+	# l_i_test_closest = []
+	score = 0.0
 	for itest, test_vec in enumerate(test_arr):
 		if (itest % 1000) == 0:
 			print('Found single closest cd for', itest, 'records')
 		cd = np.dot(train_arr, test_vec)
-		l_i_test_closest.append(np.argmax(cd))
-	return l_i_test_closest
+		if l_i_test_closest[itest] == np.argmax(cd):
+			score += 1.0
+	score /= float(len(test_arr))
+	print('Test of cd and l2 norm:', score)
+	return score
+
+
+def make_db_cg(numrecs):
+	v_db_norm = tf.Variable(tf.zeros([numrecs, c_key_dim], dtype=tf.float32), trainable=False)
+	ph_db_norm = tf.placeholder(dtype=tf.float32, shape=[numrecs, c_key_dim], name='ph_db_norm')
+	op_db_norm_assign = tf.assign(v_db_norm, ph_db_norm, name='op_db_norm_assign')
+	return v_db_norm, ph_db_norm, op_db_norm_assign
 
 def get_closest_clusters(l_centroids, l_cluster_idxs, q, k, rat):
 	l_i_cd_closest, l_l_k = [], []
@@ -74,113 +138,6 @@ def get_closest_clusters(l_centroids, l_cluster_idxs, q, k, rat):
 		l_i_cd_closest.append(cd_idx_sorted)
 	return l_i_cd_closest, l_l_k
 
-def eval_clusters(l_clusters, l_cluster_idxs, q, k_src, l_i_cluster_closest, l_i_test_closest, l_l_k):
-	num_hit = 0.
-	for itest, test_vec in enumerate(q):
-		for iicluster, icluster in enumerate(l_i_cluster_closest[itest]):
-			# k = k_src
-
-			if len(l_l_k[itest]) <= iicluster:
-				break
-			k = l_l_k[itest][iicluster]
-
-			# k = 100
-			if k == 0:
-				continue
-			elif k >= l_clusters[icluster].shape[0]:
-				cd_winners = range(l_clusters[icluster].shape[0])
-			else:
-				cd = np.dot(l_clusters[icluster], test_vec)
-				cd_winners = np.argpartition(cd, -k)[-k:]
-			if l_i_test_closest[itest] in l_cluster_idxs[icluster][cd_winners]:
-				num_hit += 1.
-				break
-	score = num_hit / q.shape[0]
-	return score
-
-def build_bin_clusters(l_clusters, nd_median):
-	l_bin_clusters = []
-	for nd_cluster in l_clusters:
-		l_bin_clusters.append(np.where(nd_cluster > nd_median,
-									   np.ones_like(nd_cluster), np.zeros_like(nd_cluster)).astype(np.int))
-
-	return l_bin_clusters
-
-def eval_clusters_on_bin(l_cluster_idxs, l_bin_clusters, l_i_cluster_closest, l_l_k, test_bin_arr, l_i_test_best):
-	# def test(train_bin_db, test_bin_arr, l_i_test_best, rat):
-	num_hits, num_poss = 0.0, 0.0
-	for itest, test_vec in enumerate(test_bin_arr):
-		for iicluster, icluster in enumerate(l_i_cluster_closest[itest]):
-			cluster = l_bin_clusters[icluster]
-			if len(l_l_k[itest]) <= iicluster:
-				break
-			k = l_l_k[itest][iicluster]
-			# k = c_num_k_eval
-			if k == 0:
-				continue
-			elif k >= cluster.shape[0]:
-				hd_winners = range(cluster.shape[0])
-			else:
-				hd = np.sum(np.where(np.not_equal(test_vec, cluster),
-									 np.ones_like(cluster), np.zeros_like(cluster)), axis=1)
-				hd_winners = np.argpartition(hd, k)[:k]
-				# idx_winners = [l_cluster_idxs[icluster][idx] for ]
-			if np.any(l_cluster_idxs[icluster][hd_winners] == l_i_test_best[itest]):
-				num_hits += 1.0
-				break
-
-	return num_hits / float(test_bin_arr.shape[0])
-
-def load_word_dict():
-	global g_word_vec_len
-	glove_fh = open(glove_fn, 'rb')
-	glove_csvr = csv.reader(glove_fh, delimiter=' ', quoting=csv.QUOTE_NONE)
-
-	word_dict = {}
-	word_arr = []
-	for irow, row in enumerate(glove_csvr):
-		if irow % 10000 == 0:
-			print('Loaded', irow, 'rows.')
-		word = row[0]
-		vec = [float(val) for val in row[1:]]
-		vec = np.array(vec, dtype=np.float32)
-		en = np.linalg.norm(vec, axis=0)
-		vec = vec / en
-		word_dict[word] = vec
-		word_arr.append(vec)
-		if irow > num_words:
-			break
-	# print(row)
-
-	glove_fh.close()
-	g_word_vec_len = len(word_dict['the'])
-	random.shuffle(word_arr)
-	return word_dict, np.array(word_arr)
-
-def create_baseline(nd_full_db, arr_median):
-	# arr_median = np.tile(np.median(nd_full_db, axis=1), (nd_full_db.shape[1], 1)).transpose()
-	# return np.greater(nd_full_db, arr_median).astype(np.float32)
-	# arr_median = np.median(nd_full_db, axis=0)
-	return np.where(nd_full_db > arr_median, np.ones_like(nd_full_db), np.zeros_like(nd_full_db)).astype(np.int)
-
-
-def test(train_bin_db, test_bin_arr, l_i_test_best, rat):
-	num_hits, num_poss = 0.0, 0.0
-	for itest, test_vec in enumerate(test_bin_arr):
-		if itest % 100 == 0:
-			print('Baseline: tested', itest, 'records')
-		hd = np.sum(np.where(np.not_equal(test_vec, train_bin_db), np.ones_like(train_bin_db), np.zeros_like(train_bin_db)), axis=1)
-		hd_winners = np.argpartition(hd, (rat + 1))[:(rat + 1)]
-		num_hits += 1.0 if np.any(hd_winners == l_i_test_best[itest]) else 0.0
-
-	return num_hits / float(test_bin_arr.shape[0])
-
-
-def make_db_cg(numrecs):
-	v_db_norm = tf.Variable(tf.zeros([numrecs, c_key_dim], dtype=tf.float32), trainable=False)
-	ph_db_norm = tf.placeholder(dtype=tf.float32, shape=[numrecs, c_key_dim], name='ph_db_norm')
-	op_db_norm_assign = tf.assign(v_db_norm, ph_db_norm, name='op_db_norm_assign')
-	return v_db_norm, ph_db_norm, op_db_norm_assign
 
 def make_per_batch_init_cg(numrecs, v_db_norm, num_centroids):
 	# The goal is to cluster the convolution vectors so that we can perform dimension reduction
@@ -271,17 +228,68 @@ def update_centroids_cg(v_db_norm, v_all_centroids, v_closest_idxs, num_tot_db_e
 	t_kmeans_err = tf.reduce_mean(t_cent_dist, name='t_kmeans_err')
 	return t_kmeans_err, op_centroids_update, ph_new_centroids, ph_votes_count, t_votes_count
 
+def eval_clusters(l_clusters, l_cluster_idxs, q, k_src, l_i_cluster_closest, l_i_test_closest, l_l_k):
+	num_hit = 0.
+	for itest, test_vec in enumerate(q):
+		for iicluster, icluster in enumerate(l_i_cluster_closest[itest]):
+			# k = k_src
+
+			if len(l_l_k[itest]) <= iicluster:
+				break
+			k = l_l_k[itest][iicluster]
+
+			# k = 100
+			if k == 0:
+				continue
+			elif k >= l_clusters[icluster].shape[0]:
+				cd_winners = range(l_clusters[icluster].shape[0])
+			else:
+				cd = np.dot(l_clusters[icluster], test_vec)
+				cd_winners = np.argpartition(cd, -k)[-k:]
+			if l_i_test_closest[itest] in l_cluster_idxs[icluster][cd_winners]:
+				num_hit += 1.
+				break
+	score = num_hit / q.shape[0]
+	return score
+
+def build_bin_clusters(l_clusters, nd_median):
+	l_bin_clusters = []
+	for nd_cluster in l_clusters:
+		l_bin_clusters.append(np.where(nd_cluster > nd_median,
+									   np.ones_like(nd_cluster), np.zeros_like(nd_cluster)).astype(np.int))
+
+	return l_bin_clusters
+
+def eval_clusters_on_bin(l_cluster_idxs, l_bin_clusters, l_i_cluster_closest, l_l_k, test_bin_arr, l_i_test_best):
+	# def test(train_bin_db, test_bin_arr, l_i_test_best, rat):
+	num_hits, num_poss = 0.0, 0.0
+	for itest, test_vec in enumerate(test_bin_arr):
+		for iicluster, icluster in enumerate(l_i_cluster_closest[itest]):
+			cluster = l_bin_clusters[icluster]
+			if len(l_l_k[itest]) <= iicluster:
+				break
+			k = l_l_k[itest][iicluster]
+			# k = c_num_k_eval
+			if k == 0:
+				continue
+			elif k >= cluster.shape[0]:
+				hd_winners = range(cluster.shape[0])
+			else:
+				hd = np.sum(np.where(np.not_equal(test_vec, cluster),
+									 np.ones_like(cluster), np.zeros_like(cluster)), axis=1)
+				hd_winners = np.argpartition(hd, k)[:k]
+				# idx_winners = [l_cluster_idxs[icluster][idx] for ]
+			if np.any(l_cluster_idxs[icluster][hd_winners] == l_i_test_best[itest]):
+				num_hits += 1.0
+				break
+
+	return num_hits / float(test_bin_arr.shape[0])
+
 
 def prep_learn():
 	sess = tf.Session()
 	sess.run(tf.global_variables_initializer())
 	return sess
-	# t_y_db, l_W_db, l_W_q, l_batch_assigns, t_err, op_train_step = \
-	# 	dmlearn.prep_learn(ivec_dim_dict_db, ivec_dim_dict_q, ivec_arr_db, ivec_arr_q, match_pairs, mismatch_pairs)
-	# sess, saver = dmlearn.init_learn(l_W_db + l_W_q)
-	# do_set_eval(sess, input_db, output_db,  t_y_db, input_eval,
-	# 			event_results_eval, event_result_id_arr)
-	pass
 
 def learn(sess, nd_train_recs):
 	numrecs = nd_train_recs.shape[0]
@@ -355,6 +363,8 @@ def learn(sess, nd_train_recs):
 			nd_new_centroids = np.ndarray(dtype = np.float32, shape = [c_num_clusters * c_kmeans_num_batches, c_key_dim])
 			nd_votes_count = np.ndarray(dtype = np.float32, shape = [c_num_clusters * c_kmeans_num_batches])
 			for icent in range(c_num_clusters * c_kmeans_num_batches):
+				if icent != 0 and icent % 100 == 0:
+					print('building kmeans db. centroid # =', icent)
 				r_cent_avg, r_cent_vote_count, r_vote_for_this \
 					= sess.run([t_avg, t_vote_count, t_vote_for_this], feed_dict={ph_i_centroid:icent})
 				nd_new_centroids[icent, : ]  = r_cent_avg
@@ -386,42 +396,29 @@ def learn(sess, nd_train_recs):
 
 	return r_centroids, l_cluster_idxs
 
+
 def main():
-	print('Starting...')
-	word_dict, word_arr = load_word_dict()
-	print('Glove vectors loaded.')
-	num_recs_total = word_arr.shape[0]
-	train_limit = int(num_recs_total * c_train_fraction)
-	train_limit = train_limit - (train_limit % (c_kmeans_num_db_segs * c_kmeans_num_batches))
-	nd_train_recs = word_arr[:train_limit, :]
-	nd_q_recs = word_arr[train_limit:, :]
-	l_i_test_closest = find_cd_single_closest(nd_train_recs, nd_q_recs)
-	print('Found single cd closest.')
-	nd_median = np.median(word_arr, axis=0)
-	nd_bin_db, nd_bin_q = create_baseline(nd_train_recs, nd_median), create_baseline(nd_q_recs, nd_median)
-	print('Created baseline bitvectors.')
-	if c_b_test_baseline:
-		rat2000 = test(nd_bin_db, nd_bin_q, l_i_test_closest, 2000)
-		# # rat100 = test(nd_bin_db, nd_bin_q, l_i_test_closest, 100)
-		# # rat1000 = test(nd_bin_db, nd_bin_q, l_i_test_closest, 1000)
-		# # print('r@: 10, 100, 1000:', rat10, rat100, rat1000)
-		print('baseline r@: 2000:', rat2000)
+	nd_db, nd_q, nd_gt = load_vecs()
+	nd_median = np.median(nd_db, axis=0)
+	nd_bin_db, nd_bin_q = create_baseline(nd_db, nd_median), create_baseline(nd_q, nd_median)
+	l_i_test_best = [nd_gt[iq][0] for iq in xrange(nd_q.shape[0])]
+	if c_b_small:
+		test_cd_single_closest(nd_db, nd_q, l_i_test_best)
+		rat = test(nd_bin_db, nd_bin_q, l_i_test_best, c_rat)
+		print('baseline r@:', c_rat, ':', rat)
 	sess = prep_learn()
-	l_centroids, l_cluster_idxs = learn(sess, nd_train_recs)
+	l_centroids, l_cluster_idxs = learn(sess, nd_db)
 	l_clusters = []
 	for cluster_idxs in l_cluster_idxs:
-		l_clusters.append(nd_train_recs[cluster_idxs])
-	l_i_cluster_closest, l_k = get_closest_clusters(l_centroids, l_cluster_idxs, nd_q_recs, c_num_clusters_q, c_global_rat)
-	score = eval_clusters(l_clusters, l_cluster_idxs, nd_q_recs, c_num_k_eval, l_i_cluster_closest, l_i_test_closest, l_k)
-	print(c_num_clusters_q, 'out of', c_num_clusters, 'clusters, k =', c_num_k_eval, 'per cluster,', train_limit, 'training records', nd_q_recs.shape[0], 'queries. score:', score)
+		l_clusters.append(nd_db[cluster_idxs])
+	l_i_cluster_closest, l_k = get_closest_clusters(l_centroids, l_cluster_idxs, nd_q, c_num_clusters_q, c_global_rat)
+	score = eval_clusters(l_clusters, l_cluster_idxs, nd_q, c_num_k_eval, l_i_cluster_closest, l_i_test_best, l_k)
+	print(c_num_clusters_q, 'out of', c_num_clusters, 'clusters, k =', c_num_k_eval, 'per cluster,', nd_db.shape[0], 'training records', nd_q.shape[0], 'queries. score:', score)
 
 	l_bin_clusters = build_bin_clusters(l_clusters, nd_median)
-	final_score = eval_clusters_on_bin(l_cluster_idxs, l_bin_clusters, l_i_cluster_closest, l_k, nd_bin_q, l_i_test_closest)
+	final_score = eval_clusters_on_bin(l_cluster_idxs, l_bin_clusters, l_i_cluster_closest, l_k, nd_bin_q, l_i_test_best)
 	print('r@:',c_global_rat, ':', final_score)
 	return
 
-
 main()
 print('done')
-
-
